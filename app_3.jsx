@@ -59,7 +59,14 @@ export default function App() {
   const [editComboName, setEditComboName] = useState("");
   const [editComboPickup, setEditComboPickup] = useState("");
   const [editComboDropoff, setEditComboDropoff] = useState("");
-  const [rides, setRides] = useState([]);
+  const {
+  rides,
+  createRide,
+  claimRide,
+  startRide,
+  completeRide,
+  deleteRide
+} = useRealtimeRides();
   const [rideHistory, setRideHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
   const [baseFare, setBaseFare] = useState(10);
