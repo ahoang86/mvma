@@ -31,6 +31,14 @@ export default function App() {
     window.addEventListener("resize", fn); return () => window.removeEventListener("resize", fn);
   }, []);
 
+  useEffect(() => {
+    if (window.google?.maps) return;
+    const script = document.createElement("script");
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_KEY}&libraries=geometry`;
+    script.async = true;
+    document.head.appendChild(script);
+  }, []);
+
   const [view, setView] = useState("dispatcher");
   const [dispatchTab, setDispatchTab] = useState("rides");
   const [activeDriverId, setActiveDriverId] = useState(1);
@@ -171,21 +179,30 @@ export default function App() {
 
   async function getDrivingDistance(pickup, dropoff) {
     const pu = extractAddress(pickup), dr = extractAddress(dropoff);
-    try {
-      const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(pu)}&destinations=${encodeURIComponent(dr)}&units=imperial&key=${GOOGLE_KEY}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      const element = data.rows?.[0]?.elements?.[0];
-      if (element?.status === "OK" && element?.distance?.value) {
-        return (element.distance.value / 1609.34).toFixed(1);
-      }
-    } catch {}
-    try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 50, messages: [{ role: "user", content: `Driving distance in miles between "${pu}" and "${dr}". Reply with ONLY a single decimal number.` }] }) });
-      const data = await res.json();
-      const num = parseFloat(data.content?.[0]?.text?.trim());
-      return isNaN(num) ? null : num.toFixed(1);
-    } catch { return null; }
+    return new Promise((resolve) => {
+      const attempt = (retries) => {
+        if (window.google?.maps) {
+          const service = new window.google.maps.DistanceMatrixService();
+          service.getDistanceMatrix(
+            { origins: [pu], destinations: [dr], travelMode: window.google.maps.TravelMode.DRIVING, unitSystem: window.google.maps.UnitSystem.IMPERIAL },
+            (res, status) => {
+              if (status === "OK") {
+                const el = res.rows?.[0]?.elements?.[0];
+                if (el?.status === "OK" && el?.distance?.value) {
+                  return resolve((el.distance.value / 1609.34).toFixed(1));
+                }
+              }
+              resolve(null);
+            }
+          );
+        } else if (retries > 0) {
+          setTimeout(() => attempt(retries - 1), 500);
+        } else {
+          resolve(null);
+        }
+      };
+      attempt(10);
+    });
   }
   async function createRide() {
     const pu = getPickupLabel(), dr = getDropoffLabel();
