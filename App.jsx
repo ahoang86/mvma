@@ -13,7 +13,7 @@ const RIDE_STATUS_COLOR = { pending: "#f59e0b", accepted: "#8b5cf6", "in-progres
 let rideCounter = 1, notifCounter = 1, locCounter = DEFAULT_LOCATIONS.length + 1, comboCounter = 1;
 function now() { return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
 const MAX_HIST = 30;
-const ORS_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjYxNTNhZWI0MjI2ZjQ5NTc4YWZlMzhmN2VkNzI2MGUyIiwiaCI6Im11cm11cjY0In0=";
+const GOOGLE_KEY = "AIzaSyCcUkbkh-H51RRxzhxkOzIFh9d7Fnd_aEs";
 
 const CSS = `
   ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-thumb{background:#2d3148;border-radius:4px}
@@ -169,27 +169,19 @@ export default function App() {
   function getDropoffLabel() { if (dropoffMode === "type") return dropoffCustom; const l = locations.find(x => x.id === dropoffId); return l ? `${l.name} — ${l.address}` : ""; }
   function extractAddress(label) { const parts = label.split(" — "); return parts.length > 1 ? parts.slice(1).join(" — ").trim() : label.trim(); }
 
-  async function geocodeORS(address) {
-    try {
-      const res = await fetch(`https://api.openrouteservice.org/geocode/search?api_key=${ORS_KEY}&text=${encodeURIComponent(address)}&size=1`);
-      const data = await res.json();
-      const coords = data.features?.[0]?.geometry?.coordinates;
-      return coords ? { lon: coords[0], lat: coords[1] } : null;
-    } catch { return null; }
-  }
   async function getDrivingDistance(pickup, dropoff) {
     const pu = extractAddress(pickup), dr = extractAddress(dropoff);
     try {
-      const [g1, g2] = await Promise.all([geocodeORS(pu), geocodeORS(dr)]);
-      if (g1 && g2) {
-        const res = await fetch("https://api.openrouteservice.org/v2/directions/driving-car", { method: "POST", headers: { "Authorization": ORS_KEY, "Content-Type": "application/json" }, body: JSON.stringify({ coordinates: [[g1.lon, g1.lat], [g2.lon, g2.lat]] }) });
-        const data = await res.json();
-        const meters = data.routes?.[0]?.summary?.distance;
-        if (meters) return (meters / 1609.34).toFixed(1);
+      const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(pu)}&destinations=${encodeURIComponent(dr)}&units=imperial&key=${GOOGLE_KEY}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      const element = data.rows?.[0]?.elements?.[0];
+      if (element?.status === "OK" && element?.distance?.value) {
+        return (element.distance.value / 1609.34).toFixed(1);
       }
     } catch {}
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 50, messages: [{ role: "user", content: `Driving distance in miles between "${pu}" and "${dr}". Reply with ONLY a single decimal number.` }] }) });
+      const res = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 50, messages: [{ role: "user", content: `Driving distance in miles between "${pu}" and "${dr}". Reply with ONLY a single decimal number.` }] }) });
       const data = await res.json();
       const num = parseFloat(data.content?.[0]?.text?.trim());
       return isNaN(num) ? null : num.toFixed(1);
