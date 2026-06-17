@@ -565,8 +565,9 @@ export default function App() {
                   </div>
                   <div style={{ fontSize: 14, color: "#94a3b8", marginBottom: 2 }}>📍 {ride.pickup}</div>
                   <div style={{ fontSize: 14, color: "#94a3b8", marginBottom: 2 }}>🏁 {ride.dropoff}</div>
-                  <div style={{ fontSize: 13, color: "#475569", marginBottom: 10 }}>📏 {distDisplay(ride)}</div>
-                  <button onClick={() => claimRide(ride.id, activeDriverId)} style={btnP}>✋ Claim Ride</button>
+                  <div style={{ fontSize: 13, color: "#475569" }}>📏 {distDisplay(ride)}</div>
+                  {notesSection(ride, activeDriver?.name || "Driver", true)}
+                  <button onClick={() => claimRide(ride.id, activeDriverId)} style={{ ...btnP, marginTop: 10 }}>✋ Claim Ride</button>
                 </div>
               ))}
             </div>
