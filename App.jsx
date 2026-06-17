@@ -89,6 +89,8 @@ export default function App() {
   const [drivRedoStack, setDrivRedoStack] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [noteDrafts, setNoteDrafts] = useState({});
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [editDraft, setEditDraft] = useState("");
 
   const notifColors = { info: "#3b82f6", success: "#22c55e", warning: "#f59e0b" };
 
@@ -177,9 +179,17 @@ export default function App() {
     setRides(prev => prev.map(r => r.id === rideId ? { ...r, notes: [...(r.notes || []), note] } : r));
     setNoteDrafts(prev => ({ ...prev, [rideId]: "" }));
   }
-  function removeNote(rideId, noteId, fromDriver) {
+  function removeNote(rideId, noteId, fromDriver, author) {
     if (fromDriver) pushDriv(); else pushDisp();
-    setRides(prev => prev.map(r => r.id === rideId ? { ...r, notes: (r.notes || []).filter(n => n.id !== noteId) } : r));
+    setRides(prev => prev.map(r => r.id === rideId ? { ...r, notes: (r.notes || []).filter(n => !(n.id === noteId && n.author === author)) } : r));
+  }
+  function editNote(rideId, noteId, fromDriver, author) {
+    const text = editDraft.trim();
+    if (!text) return;
+    if (fromDriver) pushDriv(); else pushDisp();
+    setRides(prev => prev.map(r => r.id === rideId ? { ...r, notes: (r.notes || []).map(n => (n.id === noteId && n.author === author) ? { ...n, text, edited: true } : n) } : r));
+    setEditingNoteId(null);
+    setEditDraft("");
   }
 
   async function geocodeNominatim(address) {
@@ -231,10 +241,29 @@ export default function App() {
             {notes.map(n => (
               <div key={n.id} style={{ background: "#0f1117", border: "1px solid #2d3148", borderRadius: 6, padding: "6px 9px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "#818cf8" }}>{n.author} <span style={{ color: "#475569", fontWeight: 500 }}>· {n.ts}</span></span>
-                  <button onClick={() => removeNote(ride.id, n.id, fromDriver)} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 0 }}>✕</button>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#818cf8" }}>{n.author} <span style={{ color: "#475569", fontWeight: 500 }}>· {n.ts}{n.edited ? " (edited)" : ""}</span></span>
+                  {n.author === author && editingNoteId !== n.id && (
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <button onClick={() => { setEditingNoteId(n.id); setEditDraft(n.text); }} style={{ background: "none", border: "none", color: "#818cf8", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 0 }}>✎</button>
+                      <button onClick={() => removeNote(ride.id, n.id, fromDriver, author)} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 0 }}>✕</button>
+                    </div>
+                  )}
                 </div>
-                <div style={{ fontSize: 14, color: "#cbd5e1", marginTop: 2 }}>{n.text}</div>
+                {editingNoteId === n.id ? (
+                  <div style={{ display: "flex", gap: 6, marginTop: 5 }}>
+                    <input
+                      value={editDraft}
+                      onChange={e => setEditDraft(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") editNote(ride.id, n.id, fromDriver, author); if (e.key === "Escape") { setEditingNoteId(null); setEditDraft(""); } }}
+                      autoFocus
+                      style={{ ...inp({ flex: 1, padding: isMobile ? "9px 10px" : "7px 10px", fontSize: 13 }) }}
+                    />
+                    <button onClick={() => editNote(ride.id, n.id, fromDriver, author)} style={{ ...btnS("#22c55e", "#22c55e22"), padding: isMobile ? "9px 14px" : "7px 12px" }}>Save</button>
+                    <button onClick={() => { setEditingNoteId(null); setEditDraft(""); }} style={{ ...btnS("#94a3b8", "#94a3b822"), padding: isMobile ? "9px 14px" : "7px 12px" }}>Cancel</button>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 14, color: "#cbd5e1", marginTop: 2 }}>{n.text}</div>
+                )}
               </div>
             ))}
           </div>
@@ -259,7 +288,7 @@ export default function App() {
       <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #2d3148" }}>
         {notes.map(n => (
           <div key={n.id} style={{ fontSize: 13, color: "#94a3b8", marginTop: 3 }}>
-            <span style={{ fontWeight: 700, color: "#818cf8" }}>{n.author}</span> <span style={{ color: "#475569" }}>· {n.ts}</span>
+            <span style={{ fontWeight: 700, color: "#818cf8" }}>{n.author}</span> <span style={{ color: "#475569" }}>· {n.ts}{n.edited ? " (edited)" : ""}</span>
             <div style={{ color: "#cbd5e1" }}>📝 {n.text}</div>
           </div>
         ))}
