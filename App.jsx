@@ -10,10 +10,9 @@ const DEFAULT_LOCATIONS = [
   { id: 2, name: "BWI Airport", address: "7050 Friendship Rd, Baltimore, MD 21240" },
 ];
 const RIDE_STATUS_COLOR = { pending: "#f59e0b", accepted: "#8b5cf6", "in-progress": "#06b6d4", completed: "#22c55e", cancelled: "#ef4444" };
-let rideCounter = 1, notifCounter = 1, locCounter = DEFAULT_LOCATIONS.length + 1, comboCounter = 1;
+let rideCounter = 1, notifCounter = 1, locCounter = DEFAULT_LOCATIONS.length + 1, comboCounter = 1, noteCounter = 1;
 function now() { return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
 const MAX_HIST = 30;
-const GOOGLE_KEY = "AIzaSyCcUkbkh-H51RRxzhxkOzIFh9d7Fnd_aEs";
 
 const CSS = `
   ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-thumb{background:#2d3148;border-radius:4px}
@@ -31,13 +30,6 @@ export default function App() {
     window.addEventListener("resize", fn); return () => window.removeEventListener("resize", fn);
   }, []);
 
-  useEffect(() => {
-    if (window.google?.maps) return;
-    const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_KEY}&libraries=geometry`;
-    script.async = true;
-    document.head.appendChild(script);
-  }, []);
 
   const [view, setView] = useState("dispatcher");
   const [dispatchTab, setDispatchTab] = useState("rides");
@@ -96,6 +88,7 @@ export default function App() {
   const [drivUndoStack, setDrivUndoStack] = useState([]);
   const [drivRedoStack, setDrivRedoStack] = useState([]);
   const [notifications, setNotifications] = useState([]);
+  const [noteDrafts, setNoteDrafts] = useState({});
 
   const notifColors = { info: "#3b82f6", success: "#22c55e", warning: "#f59e0b" };
 
@@ -176,33 +169,36 @@ export default function App() {
   function getPickupLabel() { if (pickupMode === "type") return pickupCustom; const l = locations.find(x => x.id === pickupId); return l ? `${l.name} — ${l.address}` : ""; }
   function getDropoffLabel() { if (dropoffMode === "type") return dropoffCustom; const l = locations.find(x => x.id === dropoffId); return l ? `${l.name} — ${l.address}` : ""; }
   function extractAddress(label) { const parts = label.split(" — "); return parts.length > 1 ? parts.slice(1).join(" — ").trim() : label.trim(); }
+  function addNote(rideId, author, fromDriver) {
+    const text = (noteDrafts[rideId] || "").trim();
+    if (!text) return;
+    if (fromDriver) pushDriv(); else pushDisp();
+    const note = { id: noteCounter++, text, author, ts: now() };
+    setRides(prev => prev.map(r => r.id === rideId ? { ...r, notes: [...(r.notes || []), note] } : r));
+    setNoteDrafts(prev => ({ ...prev, [rideId]: "" }));
+  }
+  function removeNote(rideId, noteId, fromDriver) {
+    if (fromDriver) pushDriv(); else pushDisp();
+    setRides(prev => prev.map(r => r.id === rideId ? { ...r, notes: (r.notes || []).filter(n => n.id !== noteId) } : r));
+  }
 
+  async function geocodeNominatim(address) {
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`, { headers: { "Accept-Language": "en" } });
+    const data = await res.json();
+    return data[0] ? { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) } : null;
+  }
   async function getDrivingDistance(pickup, dropoff) {
     const pu = extractAddress(pickup), dr = extractAddress(dropoff);
-    return new Promise((resolve) => {
-      const attempt = (retries) => {
-        if (window.google?.maps) {
-          const service = new window.google.maps.DistanceMatrixService();
-          service.getDistanceMatrix(
-            { origins: [pu], destinations: [dr], travelMode: window.google.maps.TravelMode.DRIVING, unitSystem: window.google.maps.UnitSystem.IMPERIAL },
-            (res, status) => {
-              if (status === "OK") {
-                const el = res.rows?.[0]?.elements?.[0];
-                if (el?.status === "OK" && el?.distance?.value) {
-                  return resolve((el.distance.value / 1609.34).toFixed(1));
-                }
-              }
-              resolve(null);
-            }
-          );
-        } else if (retries > 0) {
-          setTimeout(() => attempt(retries - 1), 500);
-        } else {
-          resolve(null);
-        }
-      };
-      attempt(10);
-    });
+    try {
+      const [g1, g2] = await Promise.all([geocodeNominatim(pu), geocodeNominatim(dr)]);
+      if (g1 && g2) {
+        const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${g1.lon},${g1.lat};${g2.lon},${g2.lat}?overview=false`);
+        const data = await res.json();
+        const meters = data.routes?.[0]?.distance;
+        if (meters) return (meters / 1609.34).toFixed(1);
+      }
+    } catch {}
+    return null;
   }
   async function createRide() {
     const pu = getPickupLabel(), dr = getDropoffLabel();
@@ -226,6 +222,50 @@ export default function App() {
   const btnS = (col = "#6366f1", bg = "#6366f122") => ({ background: bg, border: `1px solid ${col}44`, borderRadius: 6, color: col, cursor: "pointer", fontSize: isMobile ? 14 : 13, padding: isMobile ? "8px 14px" : "6px 12px", fontWeight: 700 });
   const undoBtn = (on) => ({ background: on ? "#2d3148" : "#1a1d27", border: `1px solid ${on ? "#475569" : "#2d3148"}`, borderRadius: 6, color: on ? "#94a3b8" : "#374151", cursor: on ? "pointer" : "not-allowed", fontSize: 14, padding: "5px 12px", fontWeight: 700 });
 
+  function notesSection(ride, author, fromDriver) {
+    const notes = ride.notes || [];
+    return (
+      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #2d3148" }}>
+        {notes.length > 0 && (
+          <div style={{ marginBottom: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+            {notes.map(n => (
+              <div key={n.id} style={{ background: "#0f1117", border: "1px solid #2d3148", borderRadius: 6, padding: "6px 9px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#818cf8" }}>{n.author} <span style={{ color: "#475569", fontWeight: 500 }}>· {n.ts}</span></span>
+                  <button onClick={() => removeNote(ride.id, n.id, fromDriver)} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 0 }}>✕</button>
+                </div>
+                <div style={{ fontSize: 14, color: "#cbd5e1", marginTop: 2 }}>{n.text}</div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 6 }}>
+          <input
+            value={noteDrafts[ride.id] || ""}
+            onChange={e => setNoteDrafts(prev => ({ ...prev, [ride.id]: e.target.value }))}
+            onKeyDown={e => e.key === "Enter" && addNote(ride.id, author, fromDriver)}
+            placeholder="📝 Add a note..."
+            style={{ ...inp({ flex: 1, padding: isMobile ? "9px 10px" : "7px 10px", fontSize: 13 }) }}
+          />
+          <button onClick={() => addNote(ride.id, author, fromDriver)} style={{ ...btnS("#6366f1", "#6366f122"), padding: isMobile ? "9px 14px" : "7px 12px" }}>Add</button>
+        </div>
+      </div>
+    );
+  }
+  function notesDisplay(ride) {
+    const notes = ride.notes || [];
+    if (!notes.length) return null;
+    return (
+      <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #2d3148" }}>
+        {notes.map(n => (
+          <div key={n.id} style={{ fontSize: 13, color: "#94a3b8", marginTop: 3 }}>
+            <span style={{ fontWeight: 700, color: "#818cf8" }}>{n.author}</span> <span style={{ color: "#475569" }}>· {n.ts}</span>
+            <div style={{ color: "#cbd5e1" }}>📝 {n.text}</div>
+          </div>
+        ))}
+      </div>
+    );
+  }
   function binItem(item, idx) {
     const colorMap = { route: "#6366f1", address: "#f59e0b", history: "#22c55e", driver: "#94a3b8" };
     const col = colorMap[item.type] || "#94a3b8";
@@ -395,6 +435,7 @@ export default function App() {
             <div style={{ fontSize: 14, color: "#94a3b8" }}>🏁 {ride.dropoff}</div>
             <div style={{ fontSize: 13, color: "#475569", marginTop: 4 }}>📏 {distDisplay(ride)}</div>
             {ride.driverId && <div style={{ fontSize: 14, color: "#6366f1", marginTop: 4 }}>👤 {drivers.find(d => d.id === ride.driverId)?.name}</div>}
+            {notesSection(ride, "Dispatcher", false)}
           </div>
         ))}
       </div>
@@ -551,6 +592,7 @@ export default function App() {
             <div style={{ fontSize: 13, color: "#475569", marginBottom: 12 }}>📏 {distDisplay(ride)}</div>
             {ride.status === "accepted" && <button onClick={() => driverAction(ride, "start")} style={{ ...btnP, background: "#1e3a5f", border: "1px solid #3b82f6", color: "#60a5fa" }}>🚗 Start Ride</button>}
             {ride.status === "in-progress" && <button onClick={() => driverAction(ride, "complete")} style={{ ...btnP, background: "#14532d", border: "1px solid #22c55e", color: "#22c55e" }}>✓ Complete Ride</button>}
+            {notesSection(ride, activeDriver?.name || "Driver", true)}
           </div>
         ))}
 
@@ -594,6 +636,7 @@ export default function App() {
                   </div>
                   <div style={{ fontSize: 13, color: "#64748b" }}>{r.pickup} → {r.dropoff}</div>
                   <div style={{ fontSize: 13, color: "#475569", marginTop: 3 }}>📏 {distDisplay(r)}</div>
+                  {notesDisplay(r)}
                 </div>
               ))}
             </div>
@@ -630,6 +673,7 @@ export default function App() {
               <div style={{ fontSize: 14, color: "#94a3b8" }}>🏁 {r.dropoff}</div>
               <div style={{ fontSize: 13, color: "#475569", marginTop: 3 }}>📏 {distDisplay(r)}</div>
               <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>👤 {r.driverName} · {r.created}</div>
+              {notesDisplay(r)}
             </div>
           ))}
         </div>
